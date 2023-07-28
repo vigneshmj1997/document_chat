@@ -24,8 +24,16 @@ from langchain.memory import ConversationBufferMemory
 from typing import List
 from gpt4all import GPT4All
 import argparse
+from langchain.retrievers import AzureCognitiveSearchRetriever
 import pandas as pd
 from tqdm import tqdm
+import os
+
+os.environ["AZURE_COGNITIVE_SEARCH_SERVICE_NAME"] = "dummy"
+os.environ["AZURE_COGNITIVE_SEARCH_INDEX_NAME"] = "dymmu"
+os.environ[
+    "AZURE_COGNITIVE_SEARCH_API_KEY"
+] = "dummy"
 
 
 def load_and_chunk_document(document_path: str) -> List:
@@ -94,14 +102,16 @@ def create_embeddings(all_splits: List, multilingual=False) -> Chroma:
 
 
 def retrieve_from_database(
-    input_query: str, vectorstore: Chroma, number_documents: int = 5
+    input_query: str, vectorstore: Chroma = None, number_documents: int = 5
 ):
     """
     Retrieves similar documents from 'vectorstore' based on 'input_query'.
     """
-    similar_docs = vectorstore.similarity_search(
-        input_query, number_documents=number_documents
-    )
+    retriever = AzureCognitiveSearchRetriever(content_key="content", top_k=2)
+    similar_docs = retriever.get_relevant_documents(input_query)
+    # similar_docs = vectorstore.similarity_search(
+    #     input_query, number_documents=number_documents
+    # )
     return similar_docs
 
 
@@ -119,10 +129,10 @@ def get_args():
 
 
 def chat(args):
-    chunks = load_and_chunk_document(args.path)
-    vectorstore = create_embeddings(chunks, args.multilingual)
+    # chunks = load_and_chunk_document(args.path)
+    # vectorstore = create_embeddings(chunks, args.multilingual)
     memory = ConversationBufferMemory()
-    gpt4all_model = GPT4All("orca-mini-3b.ggmlv3.q4_0.bin")
+    gpt4all_model = GPT4All("orca-mini-13b.ggmlv3.q4_0.bin")
     chat_history = memory.load_memory_variables({})["history"]
 
     if args.test_path:
@@ -148,7 +158,7 @@ def chat(args):
         response = {"question": [], "actual_ans": [], "prediucted_ans": []}
         for i in tqdm(len(df)):
             query = df["Question"].iloc[i]
-            context = retrieve_from_database(query, vectorstore)
+            context = retrieve_from_database(query)
             prompt = get_chat_prompt(context, query, chat_history)
             answer = gpt4all_model.generate(prompt=prompt)
             response["question"] = query
@@ -162,7 +172,7 @@ def chat(args):
     while True:
         query = str(input("Ask a question (type 'exit' to stop): "))
         if query.lower().find("exit") == -1:
-            context = retrieve_from_database(query, vectorstore)
+            context = retrieve_from_database(query)
             prompt = get_chat_prompt(context, query, chat_history)
             answer = gpt4all_model.generate(prompt=prompt)
             memory.chat_memory.add_user_message(query)
